@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 
-public class Raquette {
+public class Player {
 
     private static final String TASK_QUEUE_NAME = "task_queue";
     private static final String myId = UUID.randomUUID().toString();
@@ -17,107 +17,65 @@ public class Raquette {
     private static String state = "idle";
 
     public static void main(String[] argv) throws IOException, TimeoutException {
+        id= argv[0];
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
         final Connection connection = factory.newConnection();
         final Channel channel = connection.createChannel();
-        channel.queueDeclare(TASK_QUEUE_NAME, false, false, false, null);
+        channel.queueDeclare(id, false, false, false, null);
         System.out.println(" [*] Waiting for messages. To exit press CTRL+C");
         // Raquette pro = new Raquette();
+        String join="addPlayer#"+id;
+        channel.basicPublish("", "A",
+                MessageProperties.PERSISTENT_TEXT_PLAIN,
+                join.getBytes("UTF-8"));
+        String input;
+        Scanner scanner=new Scanner(System.in);
+        while(true){
+                System.out.println("player movement:");
+                input=scanner.nextLine();
+                String output= input+"#"+id;
+                channel.basicPublish("", "A",
+                MessageProperties.PERSISTENT_TEXT_PLAIN,
+                output.getBytes("UTF-8"));
+        }
+
 
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
             String message = new String(delivery.getBody(), "UTF-8");
-
+            
+            
             try {
-                if (message.equals("start") && state.equals("idle")) {
-                    System.out.println(state);
-                    state = "waiting";
+                if (message.startsWith("hello#")) {
+                    Strind id_s=message.substring(6,message.length()-1);
+                    String m="hello#ACK";
+                    channel.basicPublish("", id_s,
+                    MessageProperties.PERSISTENT_TEXT_PLAIN,
+                    m.getBytes("UTF-8"));
                     try {
                         channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                    System.out.println(" [x] Received '" + message + "'");
+                    //System.out.println(" [x] Received '" + message + "'");
 
-                    handShake(channel);
+                    
 
-                } else if (message.length() > 9
-                        &&
-                        (message.substring(0, 7).equals("INIT_HS") && state.equals("waiting")
-                                ||
-                                message.substring(0, 7).equals("INIT_HS") && state.equals("idle"))) {
-                    String senderId = message.substring(8, message.length() - 1);
-                    if (myId.compareTo(senderId) > 0) {
-                        try {
-                            channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        if (state.equals("idle")) {
-                            handShake(channel);
-                        }
-                        state = "pong";
-                        System.out.println(state + " higher");
-                        System.out.println(" [x] Received '" + message + "'");
-
-                    } else if (myId.compareTo(senderId) < 0) {
-                        try {
-                            channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        if (state.equals("idle")) {
-                            handShake(channel);
-                        }
-
-                        state = "ping";
-                        System.out.println(state + " lower");
-                        System.out.println(" [x] Received '" + message + "'");
-
-                        sendPing(channel);
-
-                    }  else if (myId.equals(senderId)){
-                        System.out.println(" handshake recieved a non usable message : " + message);
-                        try {
-                            channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-
-                            channel.basicReject(delivery.getEnvelope().getDeliveryTag(), true); // Reject and requeue
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
+                } else if (message.startsWith("list_p#")) {
+                    String[] ngb = new String[8];
+                    String next = message.substring(8,message.length());
+                    int i=0;
+                    while(next.length()>=1){
+                        int sep= next.indexOf('#');
+                        ngb[i]=next.substring(0,sep);
+                        i++;
+                        next=next.substring(sep+1);
                     }
-                } else if (message.equals("ping") && state.equals("pong")) {
-                    try {
-                        channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    System.out.println(message + "   ###   " + state);
-                    System.out.println(" [x] Received '" + message + "'");
+                    sendHello(channel,ngb,i,id);
 
-                    sendPong(channel);
 
-                } else if (message.equals("pong") && state.equals("ping")) {
-                    try {
-                        channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    System.out.println(message + "   &&&   " + state);
-                    System.out.println(" [x] Received '" + message + "'");
-
-                    sendPing(channel);
-
-                } else {
-                    System.out.println("general recieved a non usable message : " + message);
-                    try {
-                        channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-
-                        channel.basicReject(delivery.getEnvelope().getDeliveryTag(), false); // Reject and requeue
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
+                    
+                } 
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
@@ -144,6 +102,14 @@ public class Raquette {
                 MessageProperties.PERSISTENT_TEXT_PLAIN,
                 message.getBytes("UTF-8"));
         System.out.println(" [x] Sent '" + message + "'");
+    }
+    private static void sendHello (Channel channel, String[]ngb, int size,String id){
+        String mess="hello#"+id;
+        for (int i=0; i<size;i++){
+             channel.basicPublish("", ngb[i],
+                MessageProperties.PERSISTENT_TEXT_PLAIN,
+                mess.getBytes("UTF-8"));
+        }
     }
 
     private static void handShake(Channel channel) throws IOException {
