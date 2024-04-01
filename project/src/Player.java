@@ -2,7 +2,6 @@ import com.rabbitmq.client.*;
 
 import java.io.IOException;
 import java.util.Scanner;
-import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 
 public class Player {
@@ -14,7 +13,13 @@ public class Player {
     public static void main(String[] argv) throws IOException, TimeoutException {
         String id = argv[0];
         String taskQueue = id;
-        String zone = argv[1];
+        // static String zone = argv[1];
+        final String[] zone = new String[1];
+
+        zone[0] = argv[1];  
+        System.out.println("hello");
+
+
 
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
@@ -22,22 +27,21 @@ public class Player {
         final Channel channel = connection.createChannel();
         channel.queueDeclare(id, false, false, false, null);
         System.out.println(" [*] Waiting for messages. To exit press CTRL+C");
-
         String join = "addPlayer#" + id;
-        channel.basicPublish("", zone,
+        channel.basicPublish("", zone[0],
                 MessageProperties.PERSISTENT_TEXT_PLAIN,
                 join.getBytes("UTF-8"));
         final String[] input = new String[1];
         Scanner scanner = new Scanner(System.in);
 
-
+        // Create a new thread for the while loop
         Thread inputThread = new Thread(() -> {
             while (true) {
                 System.out.println("player movement:");
-                input[0] = scanner.nextLine(); 
+                input[0] = scanner.nextLine(); // Modify the value in the array
                 try {
                     String output = input[0] + "#" + id;
-                    channel.basicPublish("", zone,
+                    channel.basicPublish("", zone[0],
                             MessageProperties.PERSISTENT_TEXT_PLAIN,
                             output.getBytes("UTF-8"));
                 } catch (IOException e) {
@@ -46,12 +50,12 @@ public class Player {
             }
         });
 
- 
+        // Start the input thread
         inputThread.start();
 
- 
+        // Add shutdown hook to close resources when the program exits
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            scanner.close(); 
+            scanner.close(); // Close the scanner when program exits
         }));
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
             String message = new String(delivery.getBody(), "UTF-8");
@@ -80,6 +84,8 @@ public class Player {
                         next = next.substring(sep + 1);
                     }
                     sendHello(channel, ngb, i, id);
+                } else if (message.startsWith("changeZone#")){
+                    zone[0] = message.substring(message.length()-1);
                 }
             } catch (IOException e) {
                 e.printStackTrace();

@@ -1,7 +1,6 @@
 import com.rabbitmq.client.*;
 
 import java.io.IOException;
-import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import java.util.HashMap;
 import java.util.Map;
@@ -18,11 +17,13 @@ public class Node {
             System.exit(0);
         }
         String taskQueue = argv[0];
+        String nId = taskQueue;
         System.out.println(argv[0]);
         int xMax = Integer.parseInt(argv[1]);
         int xMin = Integer.parseInt(argv[2]);
         int yMax = Integer.parseInt(argv[3]);
         int yMin = Integer.parseInt(argv[4]);
+        System.out.println(xMax + " " + xMin + ";" + yMax + " " + yMin);
 
         Map<String, Point> playersPos = new HashMap<>();
         ConnectionFactory factory = new ConnectionFactory();
@@ -86,7 +87,11 @@ public class Node {
                     Point pos = playersPos.get(id);
                     int x = pos.x + 1;
                     int y = pos.y;
-                    if (IsCellOccupied(id, x, y, xMax, xMin, yMax, yMin, playersPos)) {
+                    if (x > xMax) {
+
+                        AskZoneForFreeCell(id, nId, x, y, xMax, xMin, yMax, yMin, channel);
+
+                    } else if (IsCellOccupied(id, x, y, xMax, xMin, yMax, yMin, playersPos)) {
                         pos.x++;
                         playersPos.put(id, pos);
                         checkHello(pos, id, xMax, xMin, yMax, yMin, playersPos, channel);
@@ -99,7 +104,11 @@ public class Node {
                     Point pos = playersPos.get(id);
                     int x = pos.x;
                     int y = pos.y + 1;
-                    if (IsCellOccupied(id, x, y, xMax, xMin, yMax, yMin, playersPos)) {
+                    if (y > yMax) {
+
+                        AskZoneForFreeCell(id, nId, x, y, xMax, xMin, yMax, yMin, channel);
+
+                    } else if (IsCellOccupied(id, x, y, xMax, xMin, yMax, yMin, playersPos)) {
                         pos.y++;
 
                         playersPos.put(id, pos);
@@ -122,6 +131,44 @@ public class Node {
                     System.out.println(" [x] Received '" + message + "'");
                     System.out.println("; player '" + id + "' moved to" + playersPos.get(id).Print());
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+                } else if (message.startsWith("askPos#")) {
+                    System.out.println(" [x] Received '" + message + "'");
+                    String reqZone = message.substring(7, 8);
+                    String pId = message.substring(8, 9);
+                    int xR = Integer.parseInt(message.substring(9, 10));
+                    int yR = Integer.parseInt(message.substring(10));
+                    System.out.println(reqZone + pId + xR + yR);
+
+                    Boolean answer = IsCellOccupied(pId, xR, yR, xMax, xMin, yMax, yMin, playersPos);
+                    System.out.println(answer);
+
+                    if (answer) {
+                        System.out.println("entered in answer");
+                        String answerPos = "okSwitch#" + pId;
+
+                        channel.basicPublish("", reqZone,
+                                MessageProperties.PERSISTENT_TEXT_PLAIN,
+                                answerPos.getBytes("UTF-8"));
+                        String changeZone = "changeZone#"+nId;
+                        playersPos.put(pId, new Point(xR, yR));
+
+                        channel.basicPublish("", pId,
+                                MessageProperties.PERSISTENT_TEXT_PLAIN,
+                                changeZone.getBytes("UTF-8"));
+                    }
+
+                } else if (message.startsWith("okSwitch#")) {
+                    System.out.println(" [x] Received '" + message + "'");
+
+                    String pId = message.substring(message.length() - 1);
+                    System.out.println(pId);
+                    playersPos.remove(pId);
+                    for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
+                        Point point = entry.getValue();
+                        String ndPlayer = entry.getKey();
+                        System.out.println("point in map" + point.Print() + " :  player " + ndPlayer);
+                    }
+
                 } else {
                     System.out.println("General received a non-usable message: " + message);
                     try {
@@ -142,7 +189,13 @@ public class Node {
 
     private static boolean IsCellOccupied(String pId, int pX, int pY, int xMax, int xMin, int yMax, int yMin,
             Map<String, Point> map) {
+        System.out.println(pX + " minX " + xMin);
+        System.out.println(pX + " maxX " + xMax);
+        System.out.println(pY + " minY " + yMin);
+        System.out.println(pY + " maxY " + yMax);
+
         if (pX >= xMin && pX <= xMax && pY >= yMin && pY <= yMax) {
+            System.out.println("hello ?");
             for (Map.Entry<String, Point> entry : map.entrySet()) {
                 Point point = entry.getValue();
                 String ndPlayer = entry.getKey();
@@ -163,6 +216,20 @@ public class Node {
         }
     }
 
+    private static void AskZoneForFreeCell(String pId, String nId, int pX, int pY, int xMax, int xMin, int yMax,
+            int yMin, Channel channel) {
+        if (pY > yMax) {
+            String message = "askPos#" + nId + pId + pX + pY;
+            try {
+                channel.basicPublish("", "B",
+                        MessageProperties.PERSISTENT_TEXT_PLAIN,
+                        message.getBytes("UTF-8"));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     private static void checkHello(Point p, String idP, int xMax, int xMin, int yMax, int yMin, Map<String, Point> map,
             Channel channel) throws IOException {
         String res = "list_p#";
@@ -170,7 +237,7 @@ public class Node {
         for (int i = p.x - 1; i <= p.x + 1; i++) {
             for (int j = p.y - 1; j <= p.y + 1; j++) {
                 if (i >= xMin && i <= xMax && j >= yMin && j <= yMax) {
-                    System.out.println("x : " + i + ", y : "+ j);
+                    System.out.println("x : " + i + ", y : " + j);
 
                     if (!(i == p.x && j == p.y)) {
                         for (Map.Entry<String, Point> entry : map.entrySet()) {
@@ -187,10 +254,10 @@ public class Node {
                 }
             }
         }
-        if (isThereNgb){
-        channel.basicPublish("", idP,
-                MessageProperties.PERSISTENT_TEXT_PLAIN,
-                res.getBytes("UTF-8"));
+        if (isThereNgb) {
+            channel.basicPublish("", idP,
+                    MessageProperties.PERSISTENT_TEXT_PLAIN,
+                    res.getBytes("UTF-8"));
         }
     }
 }
