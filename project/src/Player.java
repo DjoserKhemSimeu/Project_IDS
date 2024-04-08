@@ -6,21 +6,12 @@ import java.util.concurrent.TimeoutException;
 
 public class Player {
 
-    // private static final String TASK_QUEUE_NAME = "1";
-    // private static final String myId = UUID.randomUUID().toString();
-    // private static String state = "idle";
-
     public static void main(String[] argv) throws IOException, TimeoutException {
         String id = argv[0];
         String taskQueue = id;
         // static String zone = argv[1];
         final String[] zone = new String[1];
-
         zone[0] = argv[1];  
-        System.out.println("hello");
-
-
-
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
         final Connection connection = factory.newConnection();
@@ -59,20 +50,27 @@ public class Player {
         }));
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
             String message = new String(delivery.getBody(), "UTF-8");
-            System.out.println(" [x] Received '" + message + "'");
+            // System.out.println(" [x] Received '" + message + "'");
 
             try {
                 if (message.startsWith("hello#")) {
                     String idS = message.substring(6);
-                    String m = "hello#ACK";
+                    System.out.println("From "+idS+": Hello.");
+                    String m = "helloACK#"+id;
                     channel.basicPublish("", idS,
                             MessageProperties.PERSISTENT_TEXT_PLAIN,
                             m.getBytes("UTF-8"));
+                    System.out.println("To "+idS+": Hello.");
                     try {
                         channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
+                } else if (message.startsWith("helloACK#")) {
+                    System.out.println("From "+message.substring(message.indexOf("#")+1)+": Hello.");
+                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+
+
                 } else if (message.startsWith("list_p#")) {
                     String[] ngb = new String[8];
                     String next = message.substring(7);
@@ -84,8 +82,12 @@ public class Player {
                         next = next.substring(sep + 1);
                     }
                     sendHello(channel, ngb, i, id);
+                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+
                 } else if (message.startsWith("changeZone#")){
                     zone[0] = message.substring(message.length()-1);
+                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+
                 }
             } catch (IOException e) {
                 e.printStackTrace();
@@ -110,6 +112,7 @@ public class Player {
             channel.basicPublish("", ngb[i],
                     MessageProperties.PERSISTENT_TEXT_PLAIN,
                     mess.getBytes("UTF-8"));
+                    System.out.println("To "+ngb[i]+": Hello.");
         }
     }
 
