@@ -4,35 +4,63 @@ import java.io.IOException;
 import java.util.Scanner;
 import java.util.concurrent.TimeoutException;
 
-public class Player {
+public class Player implements Player_itf {
+    private final String playerId;
+    private String currentZone;
+    private final Channel channel;
+    private final Scanner scanner;
+    private final String[] input;
+    private String[][] Players;
 
-    public static void main(String[] argv) throws IOException, TimeoutException {
-        String id = argv[0];
-        String taskQueue = id;
-        // static String zone = argv[1];
-        final String[] zone = new String[1];
-        zone[0] = argv[1];  
+    public Player(String playerId, String currentZone, int height_Zone, int width_Zone) throws IOException, TimeoutException {
+        // initializing attributes
+        this.playerId = playerId;
+        this.currentZone = currentZone;
+
+        this.input = new String[1]; // used to store player movement request
+
+        this.Players = new String[width_Zone][height_Zone];
+        for (int i = 0; i < 10; i++){
+            for (int j = 0; j < 10; j++){
+                this.Players[i][j] = ".";
+            }
+        }
+        // initializing rabbitMQ channel
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
-        final Connection connection = factory.newConnection();
-        final Channel channel = connection.createChannel();
-        channel.queueDeclare(id, false, false, false, null);
-        System.out.println(" [*] Waiting for messages. To exit press CTRL+C");
-        String join = "addPlayer#" + id;
-        channel.basicPublish("", zone[0],
-                MessageProperties.PERSISTENT_TEXT_PLAIN,
-                join.getBytes("UTF-8"));
-        final String[] input = new String[1];
-        Scanner scanner = new Scanner(System.in);
+        Connection connection = factory.newConnection();
+        this.channel = connection.createChannel();
+        channel.queueDeclare(playerId, false, false, false, null);
 
-        // Create a new thread for the while loop
+        this.scanner = new Scanner(System.in);
+    }
+
+    @Override
+    public void JoinGame() throws IOException {
+        String join = "addPlayer#" + this.playerId;
+        try {
+            this.channel.basicPublish("", this.currentZone,
+                    MessageProperties.PERSISTENT_TEXT_PLAIN,
+                    join.getBytes("UTF-8"));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void start() throws IOException {
+        this.JoinGame();
+        System.out.println(
+                "Welcome in the Hello world, to move arround the world type 'up', 'down', 'left' or 'right'\n");
+        System.out.println("Have fun greeting people ! :)\n");
+
         Thread inputThread = new Thread(() -> {
             while (true) {
                 System.out.println("player movement:");
                 input[0] = scanner.nextLine(); // Modify the value in the array
                 try {
-                    String output = input[0] + "#" + id;
-                    channel.basicPublish("", zone[0],
+                    String output = input[0] + "#" + playerId;
+                    channel.basicPublish("", this.currentZone,
                             MessageProperties.PERSISTENT_TEXT_PLAIN,
                             output.getBytes("UTF-8"));
                 } catch (IOException e) {
@@ -40,80 +68,132 @@ public class Player {
                 }
             }
         });
-
-        // Start the input thread
         inputThread.start();
 
-        // Add shutdown hook to close resources when the program exits
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            scanner.close(); // Close the scanner when program exits
-        }));
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
             String message = new String(delivery.getBody(), "UTF-8");
-            // System.out.println(" [x] Received '" + message + "'");
-
-            try {
-                if (message.startsWith("hello#")) {
-                    String idS = message.substring(6);
-                    System.out.println("From "+idS+": Hello.");
-                    String m = "helloACK#"+id;
-                    channel.basicPublish("", idS,
-                            MessageProperties.PERSISTENT_TEXT_PLAIN,
-                            m.getBytes("UTF-8"));
-                    System.out.println("To "+idS+": Hello.");
-                    try {
-                        channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                } else if (message.startsWith("helloACK#")) {
-                    System.out.println("From "+message.substring(message.indexOf("#")+1)+": Hello.");
-                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-
-
-                } else if (message.startsWith("list_p#")) {
-                    String[] ngb = new String[8];
-                    String next = message.substring(7);
-                    int i = 0;
-                    while (next.length() >= 1) {
-                        int sep = next.indexOf('#');
-                        ngb[i] = next.substring(0, sep);
-                        i++;
-                        next = next.substring(sep + 1);
-                    }
-                    sendHello(channel, ngb, i, id);
-                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-
-                } else if (message.startsWith("changeZone#")){
-                    zone[0] = message.substring(message.length()-1);
-                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
-
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            handleMessage(message, delivery.getEnvelope().getDeliveryTag());
         };
-        Thread callbackThread = new Thread(() -> {
 
+        Thread callbackThread = new Thread(() -> {
             try {
-                channel.basicConsume(taskQueue, false, deliverCallback, consumerTag -> {
+                channel.basicConsume(playerId, false, deliverCallback, consumerTag -> {
                 });
             } catch (IOException e) {
                 e.printStackTrace();
             }
         });
         callbackThread.start();
-
     }
 
-    private static void sendHello(Channel channel, String[] ngb, int size, String id) throws IOException {
-        String mess = "hello#" + id;
-        for (int i = 0; i < size; i++) {
-            channel.basicPublish("", ngb[i],
-                    MessageProperties.PERSISTENT_TEXT_PLAIN,
-                    mess.getBytes("UTF-8"));
-                    System.out.println("To "+ngb[i]+": Hello.");
+    @Override
+    public void handleMessage(String message, long deliveryTag) throws IOException {
+        try {
+            System.out.println(" message received : " + message);
+
+            if (message.startsWith("hello#")) {
+                String senderId = message.substring(6);
+                System.out.println("From " + senderId + ": Hello.");
+                channel.basicPublish("", senderId, MessageProperties.PERSISTENT_TEXT_PLAIN,
+                        ("helloACK#" + playerId).getBytes("UTF-8"));
+                System.out.println("To " + senderId + ": Hello.");
+                channel.basicAck(deliveryTag, false);
+            } else if (message.startsWith("helloACK#")) {
+                System.out.println("From player " + message.substring(message.indexOf("#") + 1) + ": Hello.");
+                channel.basicAck(deliveryTag, false);
+            } else if (message.startsWith("list_p#")) {
+                String[] neighbors = message.substring(7).split("#");
+                sendHello(neighbors);
+                channel.basicAck(deliveryTag, false);
+            } else if (message.startsWith("changeZone#")) {
+                this.currentZone = message.substring(message.length() - 1);
+                channel.basicAck(deliveryTag, false);
+            } else if (message.startsWith("listofplayer#")){
+                // System.out.println("hello ?");
+                PlayerListParser(message);
+                channel.basicAck(deliveryTag, false);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
+    @Override
+    public void sendHello(String[] neighbors) throws IOException {
+        String helloMessage = "hello#" + playerId;
+        for (String neighbor : neighbors) {
+            channel.basicPublish("", neighbor, MessageProperties.PERSISTENT_TEXT_PLAIN, helloMessage.getBytes("UTF-8"));
+            System.out.println("To player " + neighbor + ": Hello.");
+        }
+    }
+
+    public static void main(String[] argv) throws IOException, TimeoutException {
+        if (argv.length != 2) {
+            System.out.println("Usage: Player <playerId> <zoneId>");
+            System.exit(1);
+        }
+
+        String playerId = argv[0];
+        String zoneId = argv[1];
+
+        Player player = new Player(playerId, zoneId, 10, 10);
+        player.start();
+    }
+
+    @Override
+    public void DisplayPlayers(String[][] players) throws IOException {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'DisplayPlayers'");
+    }
+
+    public void PlayerListParser(String message) {
+        parsePlayerList(message, this.Players);
+
+        // // Print the player grid
+        // for (String[] row : this.Players) {
+        //     for (String playerId : row) {
+        //         System.out.print(playerId + "\t");
+        //     }
+        //     System.out.println();
+        // }
+    }
+
+    public static void parsePlayerList(String message, String[][] Players) {
+        String[] parts = message.split("#");
+        String playerIDD;
+        int x;
+        int y;
+        int old_x;
+        int old_y;
+        // System.out.println("player : " + playerIDD + "x : " + x + " y : " + y);
+        for (int i = 1; i < parts.length; i++){
+            x = Integer.parseInt(parts[i].substring(1, 2));
+            y = Integer.parseInt(parts[i].substring(2, 3));
+            old_x = Integer.parseInt(parts[i].substring(3, 4));
+            old_y = Integer.parseInt(parts[i].substring(4, 5));
+            
+            playerIDD = parts[i].substring(0, 1);
+            Players[x][y] = playerIDD;
+            Players[old_x][old_y] = ".";
+        }
+        System.out.println("|\n-----------------------------------------");
+        for (int row = 0; row < 10; row++) {
+            for (int col = 0; col < 10; col++) {
+                if (col == 5){
+                    System.out.print("║ " + Players[row][col] + " ");
+                }else {
+                    System.out.print("| " + Players[row][col] + " ");
+
+                }
+            }
+            if (row == 4){
+                System.out.println("|\n=========================================");
+
+            }else {
+                System.out.println("|\n-----------------------------------------");
+
+            }
+
+        }
+    }
 }

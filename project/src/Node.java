@@ -1,5 +1,6 @@
 import com.rabbitmq.client.*;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -12,6 +13,7 @@ public class Node implements Node_itf {
     private final int yMin;
     private final Map<String, Point> playersPos;
     private final Channel channel;
+    private final String[][] players_Position;
 
     public Node(String nodeId, int xMax, int xMin, int yMax, int yMin) throws IOException, TimeoutException {
         this.nodeId = nodeId;
@@ -20,6 +22,13 @@ public class Node implements Node_itf {
         this.yMax = yMax;
         this.yMin = yMin;
         this.playersPos = new HashMap<>();
+        this.players_Position = new String[xMax - xMin + 1][yMax - yMin + 1];
+
+        for (int i = 0; i < xMax - xMin + 1; i++) {
+            for (int j = 0; j < yMax - yMin + 1; j++) {
+                players_Position[i][j] = ".";
+            }
+        }
 
         // Initialize RabbitMQ channel
         ConnectionFactory factory = new ConnectionFactory();
@@ -97,10 +106,12 @@ public class Node implements Node_itf {
             String reqZone = message.substring(7, 8);
             String pId = message.substring(8, 9);
             int xR = Integer.parseInt(message.substring(9, 10));
-            int yR = Integer.parseInt(message.substring(10));
+            int yR = Integer.parseInt(message.substring(10,11));
+            int old_x = Integer.parseInt(message.substring(11,12));
+            int old_y = Integer.parseInt(message.substring(12,13));
             // System.out.println(reqZone + pId + xR + yR);
 
-            Boolean answer = IsCellFree(pId, xR, yR, xMax, xMin, yMax, yMin, playersPos);
+            Boolean answer = IsCellFree(pId, xR, yR, xMax, xMin, yMax, yMin, playersPos, players_Position);
             // System.out.println(answer);
 
             if (answer) {
@@ -111,6 +122,11 @@ public class Node implements Node_itf {
                 String changeZone = "changeZone#" + nodeId;
                 playersPos.put(pId, new Point(xR, yR));
                 senMessage(pId, changeZone);
+                String mess = "listofplayer#" + pId + xR + yR+ old_x + old_y;
+                for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
+                    String ndPlayer = entry.getKey();
+                    channel.basicPublish("", ndPlayer, MessageProperties.PERSISTENT_TEXT_PLAIN, mess.getBytes("UTF-8"));
+                }
                 checkHello(playersPos.get(pId), pId, xMax, xMin, yMax, yMin, playersPos, channel);
 
             }
@@ -125,20 +141,23 @@ public class Node implements Node_itf {
 
             String pId = message.substring(message.length() - 1);
             // System.out.println(pId);
+            Point pos = playersPos.get(pId);
+            players_Position[pos.x-xMin][pos.y-yMin] = ".";
             playersPos.remove(pId);
+
             // for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
-            //     Point point = entry.getValue();
-            //     String ndPlayer = entry.getKey();
-            //     System.out.println("point in map" + point.Print() + " :  player " + ndPlayer);
+            // Point point = entry.getValue();
+            // String ndPlayer = entry.getKey();
+            // System.out.println("point in map" + point.Print() + " : player " + ndPlayer);
             // }
-            System.out.println("Player '"+pId+"' has left the zone '"+nodeId+"'.");
+            System.out.println("Player '" + pId + "' has left the zone '" + nodeId + "'.");
             try {
                 channel.basicAck(deliveryTag, false);
             } catch (IOException e) {
                 e.printStackTrace();
             }
 
-        } else if (message.startsWith("checkHello#")){
+        } else if (message.startsWith("checkHello#")) {
             if (message.length() > 11) {
                 String[] parts = message.split("#");
                 String pId = parts[1];
@@ -166,20 +185,9 @@ public class Node implements Node_itf {
 
     @Override
     public boolean IsCellFree(String pId, int pX, int pY, int xMax, int xMin, int yMax, int yMin,
-            Map<String, Point> map) {
+            Map<String, Point> map, String[][] playerpos) {
         if (pX >= xMin && pX <= xMax && pY >= yMin && pY <= yMax) {
-            for (Map.Entry<String, Point> entry : map.entrySet()) {
-                Point point = entry.getValue();
-                String ndPlayer = entry.getKey();
-                System.out.println("point in map" + point.Print() + " :  player " + ndPlayer);
-
-                if (point.x == pX && point.y == pY && !ndPlayer.equals(pId)) {
-                    // System.out.println(entry);
-
-                    return false;
-                }
-            }
-            return true;
+            return this.players_Position[pX-xMin][pY-yMin].equals(".");
         } else {
             return false;
         }
@@ -187,8 +195,8 @@ public class Node implements Node_itf {
 
     @Override
     public void AskZoneForFreeCell(String pId, String nId, int pX, int pY, int xMax, int xMin, int yMax,
-            int yMin, Channel channel) {
-        String message = "askPos#" + nId + pId + pX + pY;
+            int yMin, Channel channel, int old_x, int old_y) {
+        String message = "askPos#" + nId + pId + pX + pY + old_x + old_y;
 
         if ((pX >= 0 && pX <= 4) && (pY >= 0 && pY <= 4)) {
             senMessage("A", message);
@@ -204,8 +212,9 @@ public class Node implements Node_itf {
 
         }
     }
+
     @Override
-    public void senMessage(String rootingKey, String message){
+    public void senMessage(String rootingKey, String message) {
         try {
             channel.basicPublish("", rootingKey,
                     MessageProperties.PERSISTENT_TEXT_PLAIN,
@@ -224,33 +233,56 @@ public class Node implements Node_itf {
         int y = pos.y + dy;
 
         if (x < xMin || x > xMax || y < yMin || y > yMax) {
-            AskZoneForFreeCell(id, nodeId, x, y, xMax, xMin, yMax, yMin, channel);
-        } else if (IsCellFree(id, x, y, xMax, xMin, yMax, yMin, playersPos)) {
+            AskZoneForFreeCell(id, nodeId, x, y, xMax, xMin, yMax, yMin, channel, pos.x, pos.y);
+        } else if (IsCellFree(id, x, y, xMax, xMin, yMax, yMin, playersPos, this.players_Position)) {
+            if (pos.x - xMin >= xMin || pos.y-yMin <= yMin){
+                this.players_Position[pos.x-xMin][pos.y-yMin] = ".";
+            }
+
             pos.x += dx;
             pos.y += dy;
             playersPos.put(id, pos);
+            this.players_Position[pos.x-xMin][pos.y-yMin] = id;
+            String mess = "listofplayer#" + id + pos.x + pos.y + (pos.x - dx) + (pos.y - dy);
+            for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
+                String ndPlayer = entry.getKey();
+                channel.basicPublish("", ndPlayer, MessageProperties.PERSISTENT_TEXT_PLAIN, mess.getBytes("UTF-8"));
+            }
             checkHello(pos, id, xMax, xMin, yMax, yMin, playersPos, channel);
         }
+
+        // for (int row = 0; row < 5; row++) {
+        // for (int col = 0; col < 5; col++) {
+        // System.out.print("║ " + this.players_Position[row][col] + " ");
+
+        // }
+        // System.out.println("|\n-----------------------------------------");
+
+        // }
+
         System.out.println("player '" + id + "' moved to" + playersPos.get(id).Print());
+
     }
 
     @Override
-    public void singleCellCheckHello(String pId, int i, int j, Map<String, Point>map){
+    public void singleCellCheckHello(String pId, int i, int j, Map<String, Point> map) {
         String res = "list_p#";
         Boolean isThereNgb = false;
-        for (Map.Entry<String, Point> entry : map.entrySet()) {
-            Point point = entry.getValue();
-            if (point.x == i && point.y == j) {
-                isThereNgb = true;
-                res += entry.getKey() + "#";
-                // System.out.println(res);
-            }
+        System.out.println("x : "+ (i-xMin) + ", y : " + (j-yMin));
+        // for (Map.Entry<String, Point> entry : map.entrySet()) {
+        // Point point = entry.getValue();
+        if (!this.players_Position[i-xMin][j-yMin].equals(".")) {
+            isThereNgb = true;
+            res += this.players_Position[i-xMin][j-yMin] + "#";
+            // System.out.println(res);
         }
+        // }
         if (isThereNgb) {
             senMessage(pId, res);
         }
-        
+
     }
+
     @Override
     public void checkHello(Point p, String idP, int xMax, int xMin, int yMax, int yMin, Map<String, Point> map,
             Channel channel) throws IOException {
@@ -260,39 +292,37 @@ public class Node implements Node_itf {
             for (int j = p.y - 1; j <= p.y + 1; j++) {
                 if (i >= xMin && i <= xMax && j >= yMin && j <= yMax) {
                     if (!(i == p.x && j == p.y)) {
-                        for (Map.Entry<String, Point> entry : map.entrySet()) {
-                            Point point = entry.getValue();
-                            if (point.x == i && point.y == j && entry.getKey() != idP) {
-                                isThereNgb = true;
-                                res += entry.getKey() + "#";
-                                // System.out.println(res);
-                            }
+                        System.out.println("x : "+ (i-xMin) + ", y : " + (j-yMin));
+
+                        // for (Map.Entry<String, Point> entry : map.entrySet()) {
+                        // Point point = entry.getValue();
+                        if (!this.players_Position[i-xMin][j-yMin].equals(".")) {
+                            isThereNgb = true;
+                            res += this.players_Position[i-xMin][j-yMin] + "#";
+                            // System.out.println(res);
                         }
+                        // }
                     }
                 } else if ((i >= 0 && i <= 4) && (j >= 0 && j <= 4)) {
-                    String message = "checkHello#"+idP+"#"+i+"#"+j;
+                    String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("A", message);
                     // System.out.println(message);
 
-        
                 } else if ((i >= 0 && i <= 4) && (j >= 5 && j <= 9)) {
-                    String message = "checkHello#"+idP+"#"+i+"#"+j;
+                    String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("B", message);
                     // System.out.println(message);
 
-        
                 } else if ((i >= 5 && i <= 9) && (j >= 0 && j <= 4)) {
-                    String message = "checkHello#"+idP+"#"+i+"#"+j;
+                    String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("C", message);
                     // System.out.println(message);
 
-        
                 } else if ((i >= 5 && i <= 9) && (j >= 5 && j <= 9)) {
-                    String message = "checkHello#"+idP+"#"+i+"#"+j;
+                    String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("D", message);
                     // System.out.println(message);
 
-        
                 }
             }
         }

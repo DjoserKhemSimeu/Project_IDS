@@ -4,10 +4,10 @@ import java.util.Map;
 
 public interface Node_itf {
     boolean IsCellFree(String pId, int pX, int pY, int xMax, int xMin, int yMax, int yMin,
-            Map<String, Point> map);
+            Map<String, Point> map, String[][] playerpos);
 
     void AskZoneForFreeCell(String pId, String nId, int pX, int pY, int xMax, int xMin, int yMax,
-            int yMin, Channel channel);
+    int yMin, Channel channel, int old_x, int old_y);
 
     void checkHello(Point p, String idP, int xMax, int xMin, int yMax, int yMin, Map<String, Point> map,
             Channel channel) throws IOException;
@@ -21,5 +21,6 @@ public interface Node_itf {
 
     void senMessage(String rootingKey, String message);
 
-    void singleCellCheckHello(String pId, int i, int j, Map<String, Point>map);
+    void singleCellCheckHello(String pId, int i, int j, Map<String, Point> map);
+
 }
