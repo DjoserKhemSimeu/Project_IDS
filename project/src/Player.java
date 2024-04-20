@@ -88,18 +88,17 @@ public class Player implements Player_itf {
 
     @Override
     public void handleMessage(String message, long deliveryTag) throws IOException {
+        System.out.println(message);
         try {
-            System.out.println(" message received : " + message);
-
             if (message.startsWith("hello#")) {
-                String senderId = message.substring(6);
-                System.out.println("From " + senderId + ": Hello.");
+                String senderId = message.substring(message.indexOf("#") + 1);
+                System.out.println("From player " + senderId + ": Hello player "+ playerId + ".");
                 channel.basicPublish("", senderId, MessageProperties.PERSISTENT_TEXT_PLAIN,
                         ("helloACK#" + playerId).getBytes("UTF-8"));
-                System.out.println("To " + senderId + ": Hello.");
+                System.out.println("To player " + senderId + ": Hello player " + senderId + ".");
                 channel.basicAck(deliveryTag, false);
             } else if (message.startsWith("helloACK#")) {
-                System.out.println("From player " + message.substring(message.indexOf("#") + 1) + ": Hello.");
+                System.out.println("From player " + message.substring(message.indexOf("#") + 1) + ": Hello player " + playerId +".");
                 channel.basicAck(deliveryTag, false);
             } else if (message.startsWith("list_p#")) {
                 String[] neighbors = message.substring(7).split("#");
@@ -109,9 +108,15 @@ public class Player implements Player_itf {
                 this.currentZone = message.substring(message.length() - 1);
                 channel.basicAck(deliveryTag, false);
             } else if (message.startsWith("listofplayer#")){
-                // System.out.println("hello ?");
                 PlayerListParser(message);
                 channel.basicAck(deliveryTag, false);
+            }else {
+                System.out.println("General received a non-usable message: " + message);
+                try {
+                    channel.basicReject(deliveryTag, false); // Reject and don't requeue
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -123,7 +128,7 @@ public class Player implements Player_itf {
         String helloMessage = "hello#" + playerId;
         for (String neighbor : neighbors) {
             channel.basicPublish("", neighbor, MessageProperties.PERSISTENT_TEXT_PLAIN, helloMessage.getBytes("UTF-8"));
-            System.out.println("To player " + neighbor + ": Hello.");
+            System.out.println("To player " + neighbor + ": Hello player "+ neighbor+".");
         }
     }
 
@@ -173,8 +178,9 @@ public class Player implements Player_itf {
             old_y = Integer.parseInt(parts[i].substring(4, 5));
             
             playerIDD = parts[i].substring(0, 1);
-            Players[x][y] = playerIDD;
             Players[old_x][old_y] = ".";
+            Players[x][y] = playerIDD;
+
         }
         System.out.println("|\n-----------------------------------------");
         for (int row = 0; row < 10; row++) {

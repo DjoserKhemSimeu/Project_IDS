@@ -60,10 +60,9 @@ public class Node implements Node_itf {
 
     @Override
     public void processMessage(String message, long deliveryTag) throws IOException {
+        System.out.println(message);
         if (message.startsWith("addPlayer#")) {
             String id = message.substring(10);
-            // state = "ready";
-
             boolean v;
             int y;
             int x;
@@ -79,7 +78,18 @@ public class Node implements Node_itf {
                 }
             } while (v);
             playersPos.put(message.substring(10), new Point(x, y));
-            System.out.println("player '" + id + "' was created to position : " + playersPos.get(id).Print());
+            this.players_Position[x - xMin][y - yMin] = id;
+
+            String mess = "listofplayer#" + id + x + y + x + y;
+            String requestAllPlayer = "requestAll#" + id;
+            senMessage("A", mess);
+            senMessage("B", mess);
+            senMessage("C", mess);
+            senMessage("D", mess);
+            senMessage("A", requestAllPlayer);
+            senMessage("B", requestAllPlayer);
+            senMessage("C", requestAllPlayer);
+            senMessage("D", requestAllPlayer);
             try {
                 channel.basicAck(deliveryTag, false);
             } catch (IOException e) {
@@ -106,27 +116,23 @@ public class Node implements Node_itf {
             String reqZone = message.substring(7, 8);
             String pId = message.substring(8, 9);
             int xR = Integer.parseInt(message.substring(9, 10));
-            int yR = Integer.parseInt(message.substring(10,11));
-            int old_x = Integer.parseInt(message.substring(11,12));
-            int old_y = Integer.parseInt(message.substring(12,13));
-            // System.out.println(reqZone + pId + xR + yR);
-
+            int yR = Integer.parseInt(message.substring(10, 11));
+            int old_x = Integer.parseInt(message.substring(11, 12));
+            int old_y = Integer.parseInt(message.substring(12, 13));
             Boolean answer = IsCellFree(pId, xR, yR, xMax, xMin, yMax, yMin, playersPos, players_Position);
-            // System.out.println(answer);
 
             if (answer) {
-                // System.out.println("entered in answer");
                 String answerPos = "okSwitch#" + pId;
-
                 senMessage(reqZone, answerPos);
                 String changeZone = "changeZone#" + nodeId;
                 playersPos.put(pId, new Point(xR, yR));
                 senMessage(pId, changeZone);
-                String mess = "listofplayer#" + pId + xR + yR+ old_x + old_y;
+                String mess = "listofplayer#" + pId + xR + yR + old_x + old_y;
                 for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
                     String ndPlayer = entry.getKey();
                     channel.basicPublish("", ndPlayer, MessageProperties.PERSISTENT_TEXT_PLAIN, mess.getBytes("UTF-8"));
                 }
+                Node_comm_mvmt(mess);
                 checkHello(playersPos.get(pId), pId, xMax, xMin, yMax, yMin, playersPos, channel);
 
             }
@@ -137,20 +143,11 @@ public class Node implements Node_itf {
             }
 
         } else if (message.startsWith("okSwitch#")) {
-            // System.out.println(" [x] Received '" + message + "'");
 
             String pId = message.substring(message.length() - 1);
-            // System.out.println(pId);
             Point pos = playersPos.get(pId);
-            players_Position[pos.x-xMin][pos.y-yMin] = ".";
+            players_Position[pos.x - xMin][pos.y - yMin] = ".";
             playersPos.remove(pId);
-
-            // for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
-            // Point point = entry.getValue();
-            // String ndPlayer = entry.getKey();
-            // System.out.println("point in map" + point.Print() + " : player " + ndPlayer);
-            // }
-            System.out.println("Player '" + pId + "' has left the zone '" + nodeId + "'.");
             try {
                 channel.basicAck(deliveryTag, false);
             } catch (IOException e) {
@@ -173,7 +170,20 @@ public class Node implements Node_itf {
                 e.printStackTrace();
             }
 
-        } else {
+        } else if (message.startsWith("listofplayer#")) {
+            for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
+                String ndPlayer = entry.getKey();
+                channel.basicPublish("", ndPlayer, MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+                channel.basicAck(deliveryTag, false);
+
+            }
+        } else if (message.startsWith("requestAll#")){
+            String pId = message.substring(message.length() - 1);
+            AllPlayersInZone(pId);
+            channel.basicAck(deliveryTag, false);
+
+
+        }else {
             System.out.println("General received a non-usable message: " + message);
             try {
                 channel.basicReject(deliveryTag, false); // Reject and don't requeue
@@ -183,11 +193,34 @@ public class Node implements Node_itf {
         }
     }
 
+    public void Node_comm_mvmt(String message) throws IOException {
+        if (this.nodeId.equals("A")) {
+            channel.basicPublish("", "B", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "C", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "D", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+        }
+        if (this.nodeId.equals("B")) {
+            channel.basicPublish("", "A", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "C", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "D", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+        }
+        if (this.nodeId.equals("C")) {
+            channel.basicPublish("", "B", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "A", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "D", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+        }
+        if (this.nodeId.equals("D")) {
+            channel.basicPublish("", "B", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "C", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+            channel.basicPublish("", "A", MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes("UTF-8"));
+        }
+    }
+
     @Override
     public boolean IsCellFree(String pId, int pX, int pY, int xMax, int xMin, int yMax, int yMin,
             Map<String, Point> map, String[][] playerpos) {
         if (pX >= xMin && pX <= xMax && pY >= yMin && pY <= yMax) {
-            return this.players_Position[pX-xMin][pY-yMin].equals(".");
+            return this.players_Position[pX - xMin][pY - yMin].equals(".");
         } else {
             return false;
         }
@@ -235,52 +268,47 @@ public class Node implements Node_itf {
         if (x < xMin || x > xMax || y < yMin || y > yMax) {
             AskZoneForFreeCell(id, nodeId, x, y, xMax, xMin, yMax, yMin, channel, pos.x, pos.y);
         } else if (IsCellFree(id, x, y, xMax, xMin, yMax, yMin, playersPos, this.players_Position)) {
-            if (pos.x - xMin >= xMin || pos.y-yMin <= yMin){
-                this.players_Position[pos.x-xMin][pos.y-yMin] = ".";
+            if (pos.x - xMin >= xMin || pos.y - yMin <= yMin) {
+                this.players_Position[pos.x - xMin][pos.y - yMin] = ".";
             }
 
             pos.x += dx;
             pos.y += dy;
             playersPos.put(id, pos);
-            this.players_Position[pos.x-xMin][pos.y-yMin] = id;
+            this.players_Position[pos.x - xMin][pos.y - yMin] = id;
             String mess = "listofplayer#" + id + pos.x + pos.y + (pos.x - dx) + (pos.y - dy);
             for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
                 String ndPlayer = entry.getKey();
                 channel.basicPublish("", ndPlayer, MessageProperties.PERSISTENT_TEXT_PLAIN, mess.getBytes("UTF-8"));
             }
+            Node_comm_mvmt(mess);
             checkHello(pos, id, xMax, xMin, yMax, yMin, playersPos, channel);
         }
-
-        // for (int row = 0; row < 5; row++) {
-        // for (int col = 0; col < 5; col++) {
-        // System.out.print("║ " + this.players_Position[row][col] + " ");
-
-        // }
-        // System.out.println("|\n-----------------------------------------");
-
-        // }
-
-        System.out.println("player '" + id + "' moved to" + playersPos.get(id).Print());
-
     }
 
     @Override
     public void singleCellCheckHello(String pId, int i, int j, Map<String, Point> map) {
         String res = "list_p#";
         Boolean isThereNgb = false;
-        System.out.println("x : "+ (i-xMin) + ", y : " + (j-yMin));
-        // for (Map.Entry<String, Point> entry : map.entrySet()) {
-        // Point point = entry.getValue();
-        if (!this.players_Position[i-xMin][j-yMin].equals(".")) {
+        if (!this.players_Position[i - xMin][j - yMin].equals(".")) {
             isThereNgb = true;
-            res += this.players_Position[i-xMin][j-yMin] + "#";
-            // System.out.println(res);
+            res += this.players_Position[i - xMin][j - yMin] + "#";
         }
-        // }
         if (isThereNgb) {
             senMessage(pId, res);
         }
 
+    }
+
+    public void  AllPlayersInZone(String pId){
+        String res = "listofplayer";
+        for (Map.Entry<String, Point> entry : playersPos.entrySet()) {
+            Point point = entry.getValue();
+            String ndPlayer = entry.getKey();
+            res += "#";
+            res += ndPlayer + point.x+point.y+point.x+point.y;
+        }
+        senMessage(pId, res);
     }
 
     @Override
@@ -292,36 +320,27 @@ public class Node implements Node_itf {
             for (int j = p.y - 1; j <= p.y + 1; j++) {
                 if (i >= xMin && i <= xMax && j >= yMin && j <= yMax) {
                     if (!(i == p.x && j == p.y)) {
-                        System.out.println("x : "+ (i-xMin) + ", y : " + (j-yMin));
-
-                        // for (Map.Entry<String, Point> entry : map.entrySet()) {
-                        // Point point = entry.getValue();
-                        if (!this.players_Position[i-xMin][j-yMin].equals(".")) {
+                        if (!this.players_Position[i - xMin][j - yMin].equals(".")) {
                             isThereNgb = true;
-                            res += this.players_Position[i-xMin][j-yMin] + "#";
-                            // System.out.println(res);
+                            res += this.players_Position[i - xMin][j - yMin] + "#";
+
                         }
-                        // }
                     }
                 } else if ((i >= 0 && i <= 4) && (j >= 0 && j <= 4)) {
                     String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("A", message);
-                    // System.out.println(message);
 
                 } else if ((i >= 0 && i <= 4) && (j >= 5 && j <= 9)) {
                     String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("B", message);
-                    // System.out.println(message);
 
                 } else if ((i >= 5 && i <= 9) && (j >= 0 && j <= 4)) {
                     String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("C", message);
-                    // System.out.println(message);
 
                 } else if ((i >= 5 && i <= 9) && (j >= 5 && j <= 9)) {
                     String message = "checkHello#" + idP + "#" + i + "#" + j;
                     senMessage("D", message);
-                    // System.out.println(message);
 
                 }
             }
